@@ -1,0 +1,32 @@
+{
+  "name": "בית - ניהול ארוחות וקניות",
+  "short_name": "בית",
+  "description": "אפליקציה לניהול ארוחות ורשימת קניות משפחתית",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "orientation": "portrait",
+  "dir": "rtl",
+  "lang": "he",
+  "icons": [
+    {
+      "src": "/icons/app-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/app-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/app-1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
