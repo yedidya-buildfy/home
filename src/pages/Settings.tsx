@@ -3,9 +3,10 @@ import { useAuth } from '../contexts/AuthContext';
 import { db, storage } from '../lib/firebase';
 import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, addDoc, query, where, getDocs } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { User, Settings as SettingsIcon, Camera, UserPlus, Users, Home, Smartphone, LogOut } from 'lucide-react';
+import { User, Settings as SettingsIcon, Camera, UserPlus, Users, Home, Smartphone, LogOut, Mail } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
+import { sendInvitationEmailEnhanced, isEmailServiceConfigured } from '../lib/emailService';
 
 interface UserProfile {
   name: string;
@@ -237,16 +238,29 @@ export function Settings() {
   };
 
   const generateInvite = async () => {
+    console.log('🚀 SETTINGS: generateInvite called');
+    console.log('📋 SETTINGS: Input validation:', {
+      inviteEmail,
+      hasHomeData: !!homeData,
+      hasCurrentUser: !!currentUser,
+      profileName: profile.name
+    });
+
     if (!inviteEmail || !homeData || !currentUser) {
+      console.error('❌ SETTINGS: Validation failed');
       setError('אנא הזן אימייל תקין');
       return;
     }
 
     setSaving(true);
     setError('');
+    setSuccess('');
+    
     try {
+      console.log('💾 SETTINGS: Creating invitation in database...');
       const code = Math.random().toString(36).substring(2, 8).toUpperCase();
       
+      // Save invitation to database
       await addDoc(collection(db, 'invites'), {
         email: inviteEmail,
         homeId: homeData.id,
@@ -255,14 +269,41 @@ export function Settings() {
         status: 'pending',
         createdAt: new Date(),
       });
+      console.log('✅ SETTINGS: Database invitation created with code:', code);
+
+      // Prepare email data
+      const emailData = {
+        to_email: inviteEmail,
+        to_name: inviteEmail.split('@')[0],
+        home_name: homeData.name,
+        inviter_name: profile.name || 'המזמין',
+        invitation_code: code,
+        app_url: window.location.origin
+      };
+      
+      console.log('📧 SETTINGS: Preparing to send email with data:', emailData);
+
+      // Send invitation email with enhanced method (includes fallback)
+      console.log('🎯 SETTINGS: Starting email invitation process...');
+      const emailSent = await sendInvitationEmailEnhanced(emailData);
 
       setGeneratedCode(code);
       setInviteEmail('');
-      setSuccess(`קוד הזמנה נוצר: ${code}`);
+      
+      console.log('📬 SETTINGS: Email sending result:', emailSent);
+      
+      if (emailSent) {
+        setSuccess(`✅ הזמנה נשלחה בהצלחה לאימייל: ${inviteEmail} | קוד: ${code}`);
+        console.log('🎉 SETTINGS: Invitation process completed successfully!');
+      } else {
+        setError(`❌ נכשל בשליחת האימייל ל-${inviteEmail}. קוד ההזמנה נוצר: ${code} (בדוק את הקונסול למידע נוסף)`);
+        console.log('💥 SETTINGS: Email sending failed - check the logs above for details');
+      }
     } catch (error) {
-      console.error('Error generating invite:', error);
-      setError('שגיאה ביצירת הזמנה');
+      console.error('❌ SETTINGS: Error in generateInvite:', error);
+      setError(`שגיאה ביצירת הזמנה: ${error instanceof Error ? error.message : 'שגיאה לא ידועה'}`);
     } finally {
+      console.log('🏁 SETTINGS: generateInvite process finished');
       setSaving(false);
     }
   };
@@ -454,6 +495,11 @@ export function Settings() {
                 <div className="flex items-center gap-2 mb-3">
                   <UserPlus size={16} className="text-blue-600" />
                   <span className="font-medium">הזמן חברים חדשים</span>
+                  {isEmailServiceConfigured() ? (
+                    <Mail size={14} className="text-green-600" title="שליחת אימייל מופעלת" />
+                  ) : (
+                    <Mail size={14} className="text-gray-400" title="שליחת אימייל במצב בדיקה" />
+                  )}
                 </div>
                 
                 <div className="flex gap-2 mb-3">
@@ -467,9 +513,10 @@ export function Settings() {
                     onClick={generateInvite}
                     disabled={!inviteEmail.trim() || saving}
                   >
-                    הזמן
+                    {saving ? 'שולח...' : 'הזמן'}
                   </Button>
                 </div>
+
 
                 {generatedCode && (
                   <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">

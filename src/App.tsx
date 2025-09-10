@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AuthContainer } from './components/auth/AuthContainer';
 import { DebugFirebase } from './components/DebugFirebase';
 import { Settings } from './pages/Settings';
 import { Home as HomePage } from './pages/Home';
 import { Groceries } from './pages/Groceries';
+import { InviteHandler } from './components/InviteHandler';
+import { EmailDebug } from './components/EmailDebug';
 import { Home, Settings as SettingsIcon, ShoppingCart } from 'lucide-react';
 
 type Page = 'home' | 'groceries' | 'settings';
@@ -12,6 +14,34 @@ type Page = 'home' | 'groceries' | 'settings';
 function AppContent() {
   const { currentUser } = useAuth();
   const [currentPage, setCurrentPage] = useState<Page>('home');
+
+  // Check for invitation in URL
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const inviteCode = urlParams.get('code');
+    const inviteEmail = urlParams.get('email');
+    
+    if (inviteCode && inviteEmail) {
+      // Store invitation for handling
+      sessionStorage.setItem('activeInvite', JSON.stringify({ code: inviteCode, email: inviteEmail }));
+    }
+  }, []);
+
+  // Handle invitation route
+  if (window.location.pathname === '/invite') {
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+    const email = urlParams.get('email');
+    
+    if (code && email) {
+      return <InviteHandler code={code} email={email} />;
+    }
+  }
+
+  // Debug email route (for troubleshooting)
+  if (window.location.pathname === '/debug-email') {
+    return <EmailDebug />;
+  }
 
   if (!currentUser) {
     return <AuthContainer />;

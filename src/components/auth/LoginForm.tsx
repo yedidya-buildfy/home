@@ -16,6 +16,15 @@ export function LoginForm({ onSwitchToSignup, onSwitchToForgot }: LoginFormProps
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
 
+  // Check for pending invitation
+  React.useEffect(() => {
+    const pendingInvite = sessionStorage.getItem('pendingInvite');
+    if (pendingInvite) {
+      const { email: inviteEmail } = JSON.parse(pendingInvite);
+      setEmail(inviteEmail);
+    }
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -28,6 +37,14 @@ export function LoginForm({ onSwitchToSignup, onSwitchToForgot }: LoginFormProps
       setError('');
       setLoading(true);
       await login(email, password);
+      
+      // After successful login, check if there's a pending invite
+      const pendingInvite = sessionStorage.getItem('pendingInvite');
+      if (pendingInvite) {
+        const { code, email: inviteEmail } = JSON.parse(pendingInvite);
+        sessionStorage.removeItem('pendingInvite');
+        window.location.href = `/invite?code=${code}&email=${encodeURIComponent(inviteEmail)}`;
+      }
     } catch (err) {
       setError('שגיאה בהתחברות. אנא בדוק את הפרטים ונסה שוב.');
     } finally {

@@ -17,6 +17,15 @@ export function SignupForm({ onSwitchToLogin }: SignupFormProps) {
   const [loading, setLoading] = useState(false);
   const { signup } = useAuth();
 
+  // Check for pending invitation
+  React.useEffect(() => {
+    const pendingInvite = sessionStorage.getItem('pendingInvite');
+    if (pendingInvite) {
+      const { email: inviteEmail } = JSON.parse(pendingInvite);
+      setEmail(inviteEmail);
+    }
+  }, []);
+
   const validateForm = () => {
     if (!email || !password || !confirmPassword || !name) {
       setError('נא למלא את כל השדות');
@@ -47,6 +56,14 @@ export function SignupForm({ onSwitchToLogin }: SignupFormProps) {
       setError('');
       setLoading(true);
       await signup(email, password, name);
+      
+      // After successful signup, check if there's a pending invite
+      const pendingInvite = sessionStorage.getItem('pendingInvite');
+      if (pendingInvite) {
+        const { code, email: inviteEmail } = JSON.parse(pendingInvite);
+        sessionStorage.removeItem('pendingInvite');
+        window.location.href = `/invite?code=${code}&email=${encodeURIComponent(inviteEmail)}`;
+      }
     } catch (err) {
       setError('שגיאה ביצירת החשבון. אנא נסה שוב.');
     } finally {

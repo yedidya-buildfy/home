@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { db } from '../lib/firebase';
+import { db, storage } from '../lib/firebase';
 import { 
   doc, 
   getDoc, 
@@ -12,10 +12,10 @@ import {
   updateDoc, 
   deleteDoc,
   serverTimestamp,
-  getDocs,
-  where
+  getDocs
 } from 'firebase/firestore';
-import { Plus, Trash2, Check, User, X } from 'lucide-react';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { Plus, Trash2, User, X, Camera, Image } from 'lucide-react';
 
 interface GroceryItem {
   id: string;
@@ -25,6 +25,7 @@ interface GroceryItem {
   addedBy: string;
   addedAt: Date;
   checked: boolean;
+  imageUrl?: string;
 }
 
 interface UserProfile {
@@ -109,8 +110,10 @@ export function Groceries() {
   const [newItemName, setNewItemName] = useState('');
   const [newItemAmount, setNewItemAmount] = useState('');
   const [newItemNote, setNewItemNote] = useState('');
+  const [newItemImage, setNewItemImage] = useState<File | null>(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [uploadingImage, setUploadingImage] = useState(false);
   
   // Confirmation modals
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'item' | 'checked' | 'all'; itemId?: string } | null>(null);
@@ -222,7 +225,6 @@ export function Groceries() {
   // Group items by weekly sections
   const weeklyGroups = useMemo(() => {
     const today = new Date();
-    const currentWeekStart = getWeekStart(today);
     
     const groups: WeeklyGroup[] = [];
     const groupedItems: { [key: string]: GroceryItem[] } = {};
@@ -313,6 +315,28 @@ export function Groceries() {
     ) || null;
   };
 
+  // Upload image to Firebase Storage
+  const uploadItemImage = async (file: File, itemName: string): Promise<string | null> => {
+    if (!currentUser || !homeData) return null;
+    
+    setUploadingImage(true);
+    try {
+      const timestamp = Date.now();
+      const fileName = `${itemName.replace(/[^a-zA-Z0-9\u0590-\u05FF]/g, '_')}_${timestamp}`;
+      const imageRef = ref(storage, `grocery-images/${homeData.id}/${fileName}`);
+      
+      await uploadBytes(imageRef, file);
+      const downloadURL = await getDownloadURL(imageRef);
+      return downloadURL;
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      setError('שגיאה בהעלאת התמונה');
+      return null;
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
   // Add new item
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -328,6 +352,13 @@ export function Groceries() {
     setError(null);
     
     try {
+      let imageUrl: string | undefined;
+      
+      // Upload image if provided
+      if (newItemImage) {
+        imageUrl = await uploadItemImage(newItemImage, newItemName.trim()) || undefined;
+      }
+      
       const existingItem = findExistingItem(newItemName.trim());
       
       if (existingItem) {
@@ -340,25 +371,51 @@ export function Groceries() {
           ? `${existingItem.note}, ${newItemNote}`
           : existingItem.note || newItemNote;
         
-        const itemDocRef = doc(db, 'groceries', homeData.id, 'items', existingItem.id);
-        await updateDoc(itemDocRef, {
+        const updateData: {
+          amount: string;
+          note: string;
+          addedAt: ReturnType<typeof serverTimestamp>;
+          imageUrl?: string;
+        } = {
           amount: totalAmount.toString(),
           note: mergedNote,
           addedAt: serverTimestamp(),
-        });
+        };
+        
+        // Add image URL if provided and existing item doesn't have one
+        if (imageUrl && !existingItem.imageUrl) {
+          updateData.imageUrl = imageUrl;
+        }
+        
+        const itemDocRef = doc(db, 'groceries', homeData.id, 'items', existingItem.id);
+        await updateDoc(itemDocRef, updateData);
         
         setStatusMessage('הפריט מוזג עם פריט קיים');
       } else {
         // Add new item
         const itemsCollectionRef = collection(db, 'groceries', homeData.id, 'items');
-        await addDoc(itemsCollectionRef, {
+        const newItemData: {
+          name: string;
+          amount: string;
+          note: string;
+          addedBy: string;
+          addedAt: ReturnType<typeof serverTimestamp>;
+          checked: boolean;
+          imageUrl?: string;
+        } = {
           name: newItemName.trim(),
           amount: newItemAmount.trim() || '1',
           note: newItemNote.trim(),
           addedBy: currentUser.uid,
           addedAt: serverTimestamp(),
           checked: false,
-        });
+        };
+        
+        if (imageUrl) {
+          newItemData.imageUrl = imageUrl;
+        }
+        
+        await addDoc(itemsCollectionRef, newItemData);
         
         setStatusMessage('הפריט נוסף לרשימה');
       }
@@ -367,6 +424,7 @@ export function Groceries() {
       setNewItemName('');
       setNewItemAmount('');
       setNewItemNote('');
+      setNewItemImage(null);
       setShowSuggestions(false);
       
       // Clear status message after 3 seconds
@@ -608,9 +666,15 @@ export function Groceries() {
                 </label>
                 <input
                   id="itemAmount"
-                  type="text"
+                  type="number"
+                  min="1"
                   value={newItemAmount}
-                  onChange={(e) => setNewItemAmount(e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === '' || (!isNaN(Number(value)) && Number(value) >= 0)) {
+                      setNewItemAmount(value);
+                    }
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="1"
                   aria-label="כמות"
@@ -633,9 +697,56 @@ export function Groceries() {
               </div>
             </div>
 
+            {/* Image Upload */}
+            <div>
+              <label htmlFor="itemImage" className="block text-sm font-medium text-gray-700 mb-1">
+                תמונת המוצר (אופציונלי)
+              </label>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 px-4 py-2 bg-gray-50 hover:bg-gray-100 border border-gray-300 rounded-md cursor-pointer transition-colors">
+                  <Camera size={18} className="text-gray-600" />
+                  <span className="text-sm text-gray-700">
+                    {newItemImage ? newItemImage.name : 'בחר תמונה'}
+                  </span>
+                  <input
+                    id="itemImage"
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      setNewItemImage(file || null);
+                    }}
+                  />
+                </label>
+                {newItemImage && (
+                  <button
+                    type="button"
+                    onClick={() => setNewItemImage(null)}
+                    className="p-1 text-red-500 hover:text-red-700"
+                    title="הסר תמונה"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+                {uploadingImage && (
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                )}
+              </div>
+              {newItemImage && (
+                <div className="mt-2">
+                  <img
+                    src={URL.createObjectURL(newItemImage)}
+                    alt="תצוגה מקדימה"
+                    className="w-20 h-20 object-cover rounded-md border"
+                  />
+                </div>
+              )}
+            </div>
+
             <button
               type="submit"
-              disabled={addingItem || !newItemName.trim()}
+              disabled={addingItem || uploadingImage || !newItemName.trim()}
               className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-medium rounded-lg transition-colors"
             >
               {addingItem ? (
@@ -662,7 +773,7 @@ export function Groceries() {
                 className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-medium rounded-lg transition-colors"
               >
                 <Trash2 size={18} />
-                מחק הכל מסומן ({checkedItemsCount})
+                מחק מהרשימה את כל מה שמסומן ({checkedItemsCount})
               </button>
             )}
             
@@ -720,6 +831,21 @@ export function Groceries() {
                           />
                         </label>
 
+                        {/* Item Image */}
+                        {item.imageUrl ? (
+                          <div className="flex-shrink-0">
+                            <img
+                              src={item.imageUrl}
+                              alt={item.name}
+                              className="w-16 h-16 object-cover rounded-lg border border-gray-200"
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex-shrink-0 w-16 h-16 bg-gray-100 rounded-lg border border-gray-200 flex items-center justify-center">
+                            <Image size={24} className="text-gray-400" />
+                          </div>
+                        )}
+
                         {/* Item details */}
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-1">
@@ -729,9 +855,15 @@ export function Groceries() {
                                 {editingAmount?.itemId === item.id ? (
                                   <div className="flex items-center gap-1">
                                     <input
-                                      type="text"
+                                      type="number"
+                                      min="1"
                                       value={editingAmount.value}
-                                      onChange={(e) => setEditingAmount({ ...editingAmount, value: e.target.value })}
+                                      onChange={(e) => {
+                                        const value = e.target.value;
+                                        if (value === '' || (!isNaN(Number(value)) && Number(value) >= 0)) {
+                                          setEditingAmount({ ...editingAmount, value });
+                                        }
+                                      }}
                                       onKeyDown={(e) => {
                                         if (e.key === 'Enter') {
                                           handleAmountSave(item.id);
@@ -758,7 +890,7 @@ export function Groceries() {
                                       className="px-2 py-1 text-gray-600 hover:text-gray-800 hover:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed rounded-r-none rounded-l-md transition-colors"
                                       title="הקטן כמות"
                                     >
-                                      −
+                                      -
                                     </button>
                                     <span
                                       onDoubleClick={() => handleAmountEdit(item)}
@@ -823,7 +955,7 @@ export function Groceries() {
             <div className="bg-white rounded-lg p-6 max-w-sm mx-4">
               <h3 className="text-lg font-semibold text-gray-900 mb-3">
                 {deleteConfirm.type === 'item' && 'האם אתה בטוח שאתה רוצה למחוק את הפריט?'}
-                {deleteConfirm.type === 'checked' && 'האם אתה בטוח שאתה רוצה למחוק את כל הפריטים המסומנים?'}
+                {deleteConfirm.type === 'checked' && 'האם אתה בטוח שאתה רוצה למחוק את הפריטים שנבחרו?'}
                 {deleteConfirm.type === 'all' && 'האם אתה בטוח שאתה רוצה למחוק את כל הרשימה?'}
               </h3>
               
